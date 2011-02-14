@@ -1,0 +1,9 @@
+jClass is a Java Script library that allows you to write highly object-oriented code.
+
+You can use jClass to:
+
+    * Define namespaces
+    * Create and extend other classes
+    * Create and implement interfaces
+    * Define public/private/static/override/overload methods
+    * Define getter and setter methods 

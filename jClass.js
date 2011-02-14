@@ -9,14 +9,22 @@
         hashes : {
             classes : new Array(0),
             interfaces : new Array(0)
-        }
+        },
+        cachedLibraries : new Array(0)
     };
 
     var jClass = function(obj) {
         if (typeof obj !== "undefined") {
-            var cls = function() {
 
-            };
+            var tmp = {};
+            var cls = jUtils.parseObject(obj);
+
+            var clsHash = jUtils.classHash(jUtils.serialize(tmp));
+            cache.hashes.classes[clsHash] = {extends:[], implements:[],instances:0, reference:cls};
+
+            cls.hash = clsHash;
+            cls.type = "jClass";
+
             return cls;
         }
     };
@@ -77,18 +85,99 @@
     };
 
     jClass.implement = function(interface) {
-
+       
     };
 
-    jClass.use = function(namespace) {
+    jClass.require = function() {
+        if (!document.getElementById) return false;
+        var libs = cache.cachedLibraries, path = "",
+            libPath = jClass.config.librariesPath,
+            file = "",
+            head = document.getElementsByTagName("head")[0] || document.documentElement;
 
-    };
+        if (!jClass.config.librariesPath.match(/\/$/))
+            libPath = jClass.config.librariesPath = (libPath += '/');
 
-    jClass.require = function(script) {
-        
+        for (var idx = arguments.length - 1; idx > -1; idx--) {
+            file = arguments[idx];
+            if (!~libs.indexOf(file) && file) {
+                if (file.match(/\.js$/)) {
+                    path = file;
+                } else {
+                    if (file.match(/^.[a-zA-Z\.]*$/)) {
+                        path = libPath + file.replace(/\./g, "/") + ".js";
+                    }
+                }
+                var fileRef = window.document.createElement("script");
+                fileRef.setAttribute("type", "text/javascript");
+
+                if (typeof fileRef === "undefined") {
+                    return false;
+                } else {
+                    var oXML = jUtils.getXMLHttpObj();
+                    if (oXML) {
+                        oXML.open('GET', path, false);
+                        oXML.send('');
+                        if (oXML.status != 404) {
+                            if (window.ActiveXObject) {
+                                eval(oXML.responseText);
+                            } else {
+                                head.insertBefore(fileRef, head.firstChild);
+                                jUtils.appendChild(fileRef, oXML.responseText);
+                            }
+                            libs.push(file);
+                        } else {
+                            throw new Error("Library " + path + " not found");
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     };
 
     var jUtils = {
+
+        blankClass : function() {},
+        
+        parseObject : function(body) {
+            var publics = body.public;
+            var privates = body.private;
+            var statics = body.static;
+            var constructor = body.constructor;
+
+            var res = "function() {\nvar __self = this;\n";
+
+            if (constructor) {
+                res += "\nvar __constructor = " + jUtils.serialize(constructor, true) + ";\n";
+            }
+
+            for (var PMethod in publics) {
+                if (typeof publics[PMethod] == "function") {
+                    res += "\nthis." + PMethod + " = " + jUtils.serialize(publics[PMethod], true) +  ";\n";
+                } else {
+                    res += "\nthis." + PMethod + " = " + jUtils.serialize(publics[PMethod], true) + ";\n";
+                }
+            }
+
+            for (var pMethod in privates) {
+                res += "\nvar " + pMethod + " = " + jUtils.serialize(privates[pMethod], true).replace(/this\./g, "__self.") + "\n";
+            }
+
+            res += (constructor ? "\n__constructor.apply(this, arguments)" : "") + "}";
+
+            var tmp = function() {};
+            eval("tmp = " + res);
+
+            for (var sMethod in statics) {
+                tmp[sMethod] = statics[sMethod];
+            }
+
+            console.log(res);
+            return tmp;
+        },
 
         /**
          * Returns the body of the specified argument function
@@ -273,13 +362,13 @@
          * @param xValue Object
          * @return string
          */
-        serialize : function(xValue) {
+        serialize : function(xValue, noEncode) {
             switch (typeof(xValue)) {
                 case "undefined": return "void(0)";
                 case "boolean":   return xValue.toString();
                 case "number":    return xValue.toString();
-                case "string":    return "\"" + jUtils.stringEncode(xValue) + "\"";
-                case "function":  return "eval(\"" + jUtils.stringEncode(xValue.toString()) + "\")";
+                case "string":    return "\"" + (noEncode ? xValue : jUtils.stringEncode(xValue)) + "\"";
+                case "function":  return (noEncode ? xValue.toString() : "eval(\"" + jUtils.stringEncode(xValue.toString())+ "\")") ;
                 case "object":
                     if (xValue === null) return "null";
                     var bArray = true;
@@ -306,6 +395,41 @@
                 default:
                     throw new Error("Objects of type " + typeof(xValue) + " cannot be serialized.");
             }
+        },
+
+        getXMLHttpObj : function() {
+            if(typeof(XMLHttpRequest) != 'undefined') {
+                return new XMLHttpRequest();
+            }
+            var axO = ['Msxml2.XMLHTTP.6.0', 'Msxml2.XMLHTTP.4.0', 'Msxml2.XMLHTTP.3.0', 'Msxml2.XMLHTTP', 'Microsoft.XMLHTTP'], i;
+            for (i = 0; i < axO.length; i++) {
+                try {
+                    return new ActiveXObject(axO[i]);
+                } catch(e) {}
+            }
+            return null;
+        },
+
+        appendChild : function(node, text) {
+            if (null === node.canHaveChildren || node.canHaveChildren) {
+                node.appendChild(document.createTextNode(text));
+            } else {
+                node.text = text;
+            }
+        },
+
+        loopUnroll : function(values, method) {
+            var iterations = Math.floor(values.length / 8), leftover = (values.length % 8), i = 0;
+            if (leftover > 0) {
+                do {
+                    method(values[i++]);
+                } while (--leftover > 0);
+            }
+            if (iterations > 0)
+            do {
+                method(values[i++]); method(values[i++]); method(values[i++]); method(values[i++]);
+                method(values[i++]); method(values[i++]); method(values[i++]); method(values[i++]);
+            } while (--iterations > 0);
         }
     };
 

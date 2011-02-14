@@ -14,14 +14,17 @@ $(document).ready(function(){
                 console.log("inside constructr", init);
             },
             public : {
-                test : function(argument) {
-                    console.log("test method", argument)
+                asd : function() {
+                    return 1;
                 },
-                val : 2
+                test : function(argument) {
+                    return [value, this.val, testPrivate()];
+                },
+                val : 22
             },
             private : {
                 testPrivate : function(argument) {
-                    console.log("test private", argument)
+                    return [this.asd(), this.val];
                 },
                 value : 3
             },
@@ -33,14 +36,10 @@ $(document).ready(function(){
             }
         });
 
-        ok(true, "class test")
-        console.log("class");
-        console.dir(tmp);
 
-        var x = new tmp();
-
-        console.log("instance");
+        var x = new tmp(2);
         console.dir(x);
-
+        x.val = 10;
+        console.log(x.test(), x.val)
     });
 });

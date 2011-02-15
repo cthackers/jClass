@@ -13,11 +13,9 @@ $(document).ready(function(){
 
         jClass.config.librariesPath = "libtest";
 
-        try {
+        raises(function() {
             jClass.require("my.test")
-        } catch (ex) {
-            equal(ex.message, "Library libtest/my/test.js not found", "Raise error on 404");
-        }
+        }, "Raise error on 404");
 
         try {
             jClass.require("my.namespace.testfile");

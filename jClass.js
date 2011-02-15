@@ -6,32 +6,36 @@
 (function() {
 
     var cache = {
-        hashes : {
-            classes : new Array(0),
-            interfaces : new Array(0)
-        },
-        cachedLibraries : new Array(0)
+        hashes : { classes : {}, interfaces : {} },
+        cachedLibraries : Array(0),
+        classCount : 0,
+        interfCount : 0
     };
 
     var jClass = function(obj) {
         if (typeof obj !== "undefined") {
+            var tmp = jUtils.parseObject(obj);
 
-            var tmp = {};
-            var cls = jUtils.parseObject(obj);
+            cache.hashes.classes[tmp['id']] = {
+                extends:jUtils.resolveInheritanceTree(obj),
+                implements:jUtils.resolveImplementationTree(obj),
+                reference:tmp
+            };
 
-            var clsHash = jUtils.classHash(jUtils.serialize(tmp));
-            cache.hashes.classes[clsHash] = {extends:[], implements:[],instances:0, reference:cls};
+            tmp.method.__hash = tmp['id'];
+            tmp.method.__type = "jClass";
 
-            cls.hash = clsHash;
-            cls.type = "jClass";
+            tmp.method.prototype.instanceOf = function(cls) {
+               return jUtils.instanceOf.apply(tmp.method, [cls]);
+            };
 
-            return cls;
+            return tmp.method;
         }
+        return null;
     };
 
     jClass.config = {
-        librariesPath : '/libraries/',
-        id : 0
+        librariesPath : '/libraries/'
     };
 
     /**
@@ -44,48 +48,54 @@
             var type = typeof(cls[method]);
             var args = Array(0);
             if (type == "function") {
-                if (cls[method] == Number) {
-                    type = "number";
-                } else if (cls[method] == String) {
-                    type = "string";
-                } else if (cls[method] == String) {
-                    type = "string";
-                } else if (cls[method] == Boolean) {
-                    type = "boolean";
-                } else if (cls[method] == Array) {
-                    type = "array";
-                } else {
-                    var body = jUtils.getBody(cls[method]);
-                    if (body.match(/function[ ]{0,}\([a-zA-Z0-9$, ]{0,}\)[ ]{0,}\{[ ]{0,}\}/i)) {
-                        var tmp = body.replace(/function\s*|\s*{[\s\S]*/g, "").match(/(\w*\s*)\(([^\)]*)\)/)[2];
-                        if (tmp) {
-                            args = tmp.split(", ");
-                        }
-                    } else {
-                        throw new Error("Interface must not implement a method body (on method: " + method + ")")
-                    }
+                var tmp = jUtils.getMethodInfo(cls[method], true);
+                type = tmp[0];
+                if (tmp.length == 2) {
+                    args = tmp[1];
                 }
             } else {
                 throw new Error("Interface property `" + method + "` can't have a value. Define it using a type instead of a value (eg " + method + " : " + type[0].toUpperCase() + type.substr(1) + ")")
             }
             interface[method] = args.length ? [type, args] : [type];
         }
-        var interfaceHash = jUtils.classHash(jUtils.serialize(interface));
+        var interfaceHash = '#' + ++cache.interfCount;
         cache.hashes.interfaces[interfaceHash] = interface;
 
         var result = function() { throw new Error("An interface cannot be instantiated!"); };
-        result.hash = interfaceHash;
-        result.type = "jInterface";
+        result.__hash = interfaceHash;
+        result.__type = "jInterface";
 
         return result
     };
     
     jClass.extend = function(cls) {
-
+        if (cls && cls.__type == "jClass") {
+            return function(obj) {
+                obj['__inheritance'] = cls.__hash;
+                return jClass(obj);
+            };
+        } else {
+            throw new Error("Cannot extend other types beside jClass classes")
+        }
     };
 
-    jClass.implement = function(interface) {
-       
+    jClass.implement = function() {
+        if (arguments.length === 0) {
+            throw new Error("No interface provided");
+        }
+        var interfaces = new Array(0);
+        for (var i = 0; i < arguments.length; i++) {
+            var interface = arguments[i];
+            if (!interface || interface.__type != 'jInterface') {
+                throw new Error("Cannot implement other types beside jInterface interfaces")
+            }
+            interfaces.push(interface.__hash);
+        }
+        return function(obj) {
+            console.log(cache);
+            obj['__implements'] = interfaces;
+            return jClass(obj);
+        };
     };
 
     jClass.require = function() {
@@ -118,7 +128,9 @@
                     if (oXML) {
                         oXML.open('GET', path, false);
                         oXML.send('');
-                        if (oXML.status != 404) {
+                        if (oXML.status == 404) {
+                            throw new Error("Library " + path + " not found");
+                        } else {
                             if (window.ActiveXObject) {
                                 eval(oXML.responseText);
                             } else {
@@ -126,8 +138,6 @@
                                 jUtils.appendChild(fileRef, oXML.responseText);
                             }
                             libs.push(file);
-                        } else {
-                            throw new Error("Library " + path + " not found");
                         }
                     } else {
                         return false;
@@ -140,43 +150,161 @@
 
     var jUtils = {
 
+        getMethodInfo : function(method, emptyBodies) {
+            var type = typeof(method);
+            var args = Array(0);
+            if (type == "function") {
+                if (method == Number) {
+                    type = "number";
+                } else if (method == String) {
+                    type = "string";
+                } else if (method == String) {
+                    type = "string";
+                } else if (method == Boolean) {
+                    type = "boolean";
+                } else if (method == Array) {
+                    type = "array";
+                } else {
+                    var body = jUtils.getBody(method);
+                    var reg = emptyBodies ? /function[ ]{0,}\([a-zA-Z0-9$, ]{0,}\)[ ]{0,}\{[ ]{0,}\}/i : /function[ ]{0,}\([a-zA-Z0-9$, ]{0,}\)[ ]{0,}\{/i;
+                    if (body.match(reg)) {
+                        var tmp = body.replace(/function\s*|\s*{[\s\S]*/g, "").match(/(\w*\s*)\(([^\)]*)\)/)[2];
+                        if (tmp) {
+                            args = tmp.split(", ");
+                        }
+                    } else {
+                        if (emptyBodies)
+                            throw new Error("Interface must not implement a method body (on method: " + method + ")")
+                    }
+                }
+            }
+            return args.length ? [type, args] : [type];
+        },
+
+        resolveInheritanceTree : function(obj) {
+            if (obj.__inheritance) {
+                var tmp = obj.__inheritance;
+                delete(obj.__inheritance);
+                return [tmp].concat(cache.hashes.classes[tmp].extends);
+            }
+            return [];
+        },
+
+        resolveImplementationTree : function(obj) {
+            if (obj.__implementation) {
+                var tmp = obj.__implementation;
+                delete(obj.__implementation);
+                return [tmp].concat(cache.hashes.classes[tmp].implements);
+            }
+            return [];
+        },
+
+        castObject : function(object, classId) {
+            var instance = new cache.hashes.classes[classId].reference.method([String.fromCharCode(0xF0A4ADA2)]);
+            var props = jUtils.getObjectProperties(object, false);
+            if (props.length === 0) {
+                throw new Error("Cannot instantiate the object these way. Use `new Class()` to instantiate or `Class(object)` to cast object to Class")
+            }
+            var objectProps = jUtils.getObjectProperties(instance, false);
+            if (jUtils.serialize(props) == jUtils.serialize(objectProps)) {
+                for (var idx in props) {
+                    instance[props[idx]] = object[props[idx]];
+                }
+            } else {
+                throw new Error("Cast error! Object cannot be cast to this type of class")
+            }
+            return instance;
+        },
+
+        getObjectProperties : function(object, getFunctions) {
+            var result = Array(0);
+            for (var name in object) {
+                if (typeof object[name] == "function") {
+                    getFunctions && result.push(name);
+                } else {
+                    result.push(name);
+                }
+            }
+            return result;
+        },
+
         blankClass : function() {},
         
-        parseObject : function(body) {
-            var publics = body.public;
-            var privates = body.private;
-            var statics = body.static;
-            var constructor = body.constructor;
+        parseObject : function(body, returnString) {
+            var publics = body.public || {},
+                privates = body.private || {},
+                statics = body.static || {},
+                constructor = (body.constructor == Object().constructor) ? false : body.constructor,
 
-            var res = "function() {\nvar __self = this;\n";
+                method = "function() {\nvar __self = this;\n",
+                result = {publics:{}, statics:[], method:undefined, id:'#' + ++cache.classCount};
 
-            if (constructor) {
-                res += "\nvar __constructor = " + jUtils.serialize(constructor, true) + ";\n";
-            }
-
-            for (var PMethod in publics) {
-                if (typeof publics[PMethod] == "function") {
-                    res += "\nthis." + PMethod + " = " + jUtils.serialize(publics[PMethod], true) +  ";\n";
-                } else {
-                    res += "\nthis." + PMethod + " = " + jUtils.serialize(publics[PMethod], true) + ";\n";
+            if (body['__inheritance']) {
+                var parentCls = cache.hashes.classes[body['__inheritance']];
+                var reference = parentCls.reference;
+                method += "\nvar super = (" + jUtils.getBody(reference.method) + ").apply(this, arguments)\n";
+                for (var s in reference.statics) {
+                    var name = reference.statics[s];
+                    statics[name] === undefined && (statics[name] = reference.method[name])
+                }
+                for (var i in reference.publics) {
+                    result.publics[i] = reference.publics[i]
                 }
             }
 
-            for (var pMethod in privates) {
-                res += "\nvar " + pMethod + " = " + jUtils.serialize(privates[pMethod], true).replace(/this\./g, "__self.") + "\n";
+            if (constructor)
+                method += "\nvar __constructor = " + jUtils.serialize(constructor, true) + ";\n";
+
+            for (var pubMethod in publics) {
+                if (typeof publics[pubMethod] == "function") {
+                    method += "\nthis." + pubMethod + " = " + jUtils.serialize(publics[pubMethod], true) +  ";\n";
+                } else {
+                    method += "\nthis." + pubMethod + " = " + jUtils.serialize(publics[pubMethod], true) + ";\n";
+                }
+                result.publics[pubMethod] = jUtils.getMethodInfo(publics[pubMethod]);
             }
 
-            res += (constructor ? "\n__constructor.apply(this, arguments)" : "") + "}";
+            if (body['__implements']) {
+                var required = cache.hashes.interfaces[body['__implements']];
+                for (var mName in required) {
+                    var P = result.publics;
+                    if (P[mName]) {
+                        if (P[mName][0] == required[mName][0]) {
+                            if (required[mName][1] && jUtils.serialize(P[mName][1]) != jUtils.serialize(required[mName][1])) {
+                                throw new Error("Arguments of method `" + mName + "` do not meet interface requirements");
+                            }
+                        } else {
+                            throw new Error("Type of `" + mName + "` (" + P[mName][0] + ") is not the same type required by the interface : " + required[mName][0]);
+                        }
+                    } else {
+                        throw new Error("Class member `" + mName + "` of type `" +  required[mName][0] + "` required by interface was not found in class implementation");
+                    }
+                }
+            }
+
+            for (var privMethod in privates) {
+                method += "\nvar " + privMethod + " = " + jUtils.serialize(privates[privMethod], true).replace(/this\./g, "__self.") + "\n";
+            }
+            method += "if (this.constructor == window.Window) { if(jUtils.getObjectProperties(arguments[0])) return jUtils.castObject(arguments[0], '" + result.id + "'); };\n";
+            method += (constructor ? "\n(arguments.length == 1 && typeof arguments[0].concat == 'function' " +
+                    "&& arguments[0][0] == String.fromCharCode(0xF0A4ADA2)) || __constructor.apply(this, arguments)" : "") + "}";
 
             var tmp = function() {};
-            eval("tmp = " + res);
+            try {
+                eval("tmp = " + method);
+            } catch(ex) {}
 
             for (var sMethod in statics) {
                 tmp[sMethod] = statics[sMethod];
+                result.statics.push(sMethod);
             }
 
-            console.log(res);
-            return tmp;
+            result.method = tmp;
+
+            if (returnString)
+                return method;
+
+            return result;
         },
 
         /**
@@ -214,7 +342,16 @@
          * @param cls jClass class
          * @return boolean
          */
-        isInstanceOf : function(cls) {
+        instanceOf : function(cls) {
+            if (cls && cls.__type == "jClass" && cls.__hash !== '') {
+                if (cls.__hash == this.__hash) {
+                     return true;
+                }
+                if (cache.hashes.classes[this.__hash].extends.indexOf(cls.__hash) != -1) {
+                     return true;
+                }
+
+            }
             return false;
         },
 
@@ -434,7 +571,7 @@
     };
 
 
-    window['jUtils'] = jUtils;
+    //window['jUtils'] = jUtils;
     window['jClass'] = jClass;
 
 })();

@@ -9,40 +9,25 @@ $(document).ready(function(){
 
     test("Interfaces", function() {
 
-        try {
+        raises(function() {
             jClass.interface({ willFail : function(a) { a = 1; } });
-        } catch (ex) {
-            equal(ex.message, "Interface must not implement a method body (on method: willFail)",
-                    "Cannot define bodies for interface methods");
-        }
+        }, "Cannot define bodies for interface methods");
 
-        try {
+        raises(function() {
             jClass.interface({ willFail : 1 });
-        } catch (ex) {
-            equal(ex.message, "Interface property `willFail` can't have a value. Define it using a type instead of a value (eg willFail : Number)",
-                    "Cannot define values for interface properties (Numbers)");
-        }
+        }, "Cannot define values for interface properties (Numbers)");
 
-        try {
+        raises(function() {
             jClass.interface({ willFail : "test" });
-        } catch (ex) {
-            equal(ex.message, "Interface property `willFail` can't have a value. Define it using a type instead of a value (eg willFail : String)",
-                    "Cannot define values for interface properties (Strings)");
-        }
+        }, "Cannot define values for interface properties (Strings)");
 
-        try {
+        raises(function() {
             jClass.interface({ willFail : true });
-        } catch (ex) {
-            equal(ex.message, "Interface property `willFail` can't have a value. Define it using a type instead of a value (eg willFail : Boolean)",
-                    "Cannot define values for interface properties (Booleans)");
-        }
+        }, "Cannot define values for interface properties (Booleans)");
 
-        try {
+        raises(function() {
             jClass.interface({ willFail : [1,2] });
-        } catch (ex) {
-            equal(ex.message, "Interface property `willFail` can't have a value. Define it using a type instead of a value (eg willFail : Object)",
-                    "Cannot define values for interface properties (Arrays and Objects)");
-        }
+        }, "Cannot define values for interface properties (Arrays and Objects)");
 
         var myInterface = jClass.interface({
             test : function(a,b,c) {},
@@ -52,13 +37,9 @@ $(document).ready(function(){
             e : Boolean
         });
 
-        try {
-            myInterface()
-        } catch (ex) {
-            equal(ex.message, "An interface cannot be instantiated!", "Cannot instantiate interfaces")
-        }
+        raises(function() { myInterface() }, "Cannot instantiate interfaces");
 
-        equal(myInterface.type, "jInterface", "myInterface.type == 'jInterface'");
+        ok(myInterface.__type == "jInterface", "myInterface.__type == 'jInterface'");
         
     });
 });

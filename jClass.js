@@ -17,8 +17,7 @@
             var tmp = jUtils.parseObject(obj);
 
             cache.hashes.classes[tmp['id']] = {
-                extends:jUtils.resolveInheritanceTree(obj),
-                implements:jUtils.resolveImplementationTree(obj),
+                inheritance: jUtils.resolveInheritanceTree(obj),
                 reference:tmp
             };
 
@@ -28,11 +27,15 @@
             tmp.method.prototype.instanceOf = function(cls) {
                return jUtils.instanceOf.apply(tmp.method, [cls]);
             };
-
+            tmp.method.prototype.implementationOf = function(interf) {
+                return jUtils.implementationOf.apply(tmp.method, [interf])
+            };
             return tmp.method;
         }
         return null;
     };
+
+    window['cache'] = cache
 
     jClass.config = {
         librariesPath : '/libraries/'
@@ -48,7 +51,7 @@
             var type = typeof(cls[method]);
             var args = Array(0);
             if (type == "function") {
-                var tmp = jUtils.getMethodInfo(cls[method], true);
+                var tmp = jUtils.getMethodInfo(cls[method], true, method);
                 type = tmp[0];
                 if (tmp.length == 2) {
                     args = tmp[1];
@@ -70,10 +73,18 @@
     
     jClass.extend = function(cls) {
         if (cls && cls.__type == "jClass") {
-            return function(obj) {
+            var tmp = function(obj) {
                 obj['__inheritance'] = cls.__hash;
                 return jClass(obj);
             };
+            tmp.implement = function() {
+                var interface = arguments;
+                return function(obj) {
+                    obj['__inheritance'] = cls.__hash;
+                    return jClass.implement.apply(this, interface)(obj);
+                }
+            };
+            return tmp;
         } else {
             throw new Error("Cannot extend other types beside jClass classes")
         }
@@ -91,11 +102,19 @@
             }
             interfaces.push(interface.__hash);
         }
-        return function(obj) {
-            console.log(cache);
-            obj['__implements'] = interfaces;
+        
+        var tmp = function(obj) {
+            obj['__implementation'] = interfaces;
             return jClass(obj);
         };
+        tmp.extend = function() {
+                var class = arguments;
+                return function(obj) {
+                    obj['__implementation'] = interfaces;
+                    return jClass.extend.apply(this, class)(obj);
+                }
+            };
+        return tmp;
     };
 
     jClass.require = function() {
@@ -150,7 +169,7 @@
 
     var jUtils = {
 
-        getMethodInfo : function(method, emptyBodies) {
+        getMethodInfo : function(method, emptyBodies, methodName) {
             var type = typeof(method);
             var args = Array(0);
             if (type == "function") {
@@ -174,7 +193,7 @@
                         }
                     } else {
                         if (emptyBodies)
-                            throw new Error("Interface must not implement a method body (on method: " + method + ")")
+                            throw new Error("Interface must not implement a method body (on method: " + (methodName || '') + ")")
                     }
                 }
             }
@@ -182,21 +201,25 @@
         },
 
         resolveInheritanceTree : function(obj) {
+            var tree = {extends : Array(0), implements : Array(0)};
             if (obj.__inheritance) {
                 var tmp = obj.__inheritance;
                 delete(obj.__inheritance);
-                return [tmp].concat(cache.hashes.classes[tmp].extends);
+                tree.extends =  [tmp].concat(cache.hashes.classes[tmp].inheritance.extends);
             }
-            return [];
-        },
-
-        resolveImplementationTree : function(obj) {
             if (obj.__implementation) {
-                var tmp = obj.__implementation;
+                var x = obj.__implementation;
                 delete(obj.__implementation);
-                return [tmp].concat(cache.hashes.classes[tmp].implements);
+                tree.implements = tree.implements.concat(x);
+                for (var i = 0; i < tree.extends.length; i++) {
+                    var a = cache.hashes.classes[tree.extends[i]].inheritance.implements;
+                    for (var j = 0; j < a.length; j++) {
+                        if (tree.implements.indexOf(a[j]) == -1)
+                            tree.implements.push(a[j]);
+                    }
+                }
             }
-            return [];
+            return tree;
         },
 
         castObject : function(object, classId) {
@@ -264,20 +287,22 @@
                 result.publics[pubMethod] = jUtils.getMethodInfo(publics[pubMethod]);
             }
 
-            if (body['__implements']) {
-                var required = cache.hashes.interfaces[body['__implements']];
-                for (var mName in required) {
-                    var P = result.publics;
-                    if (P[mName]) {
-                        if (P[mName][0] == required[mName][0]) {
-                            if (required[mName][1] && jUtils.serialize(P[mName][1]) != jUtils.serialize(required[mName][1])) {
-                                throw new Error("Arguments of method `" + mName + "` do not meet interface requirements");
+            if (body['__implementation']) {
+                for (var k = 0; k < body['__implementation'].length; k++) {
+                    var required = cache.hashes.interfaces[body['__implementation'][k]];
+                    for (var mName in required) {
+                        var P = result.publics;
+                        if (P[mName]) {
+                            if (P[mName][0] == required[mName][0]) {
+                                if (required[mName][1] && jUtils.serialize(P[mName][1]) != jUtils.serialize(required[mName][1])) {
+                                    throw new Error("Arguments of method `" + mName + "` do not meet interface requirements");
+                                }
+                            } else {
+                                throw new Error("Type of `" + mName + "` (" + P[mName][0] + ") is not the same type required by the interface : " + required[mName][0]);
                             }
                         } else {
-                            throw new Error("Type of `" + mName + "` (" + P[mName][0] + ") is not the same type required by the interface : " + required[mName][0]);
+                            throw new Error("Class member `" + mName + "` of type `" +  required[mName][0] + "` required by interface was not found in class implementation");
                         }
-                    } else {
-                        throw new Error("Class member `" + mName + "` of type `" +  required[mName][0] + "` required by interface was not found in class implementation");
                     }
                 }
             }
@@ -287,7 +312,7 @@
             }
             method += "if (this.constructor == window.Window) { if(jUtils.getObjectProperties(arguments[0])) return jUtils.castObject(arguments[0], '" + result.id + "'); };\n";
             method += (constructor ? "\n(arguments.length == 1 && typeof arguments[0].concat == 'function' " +
-                    "&& arguments[0][0] == String.fromCharCode(0xF0A4ADA2)) || __constructor.apply(this, arguments)" : "") + "}";
+                    "&& arguments[0][0] == String.fromCharCode(0xF0A4ADA2) && (arguments = Array(0))) || __constructor.apply(this, arguments)" : "") + "}";
 
             var tmp = function() {};
             try {
@@ -347,7 +372,7 @@
                 if (cls.__hash == this.__hash) {
                      return true;
                 }
-                if (cache.hashes.classes[this.__hash].extends.indexOf(cls.__hash) != -1) {
+                if (cache.hashes.classes[this.__hash].inheritance.extends.indexOf(cls.__hash) != -1) {
                      return true;
                 }
 
@@ -360,7 +385,12 @@
          * @param interface jInterface
          * @return boolean
          */
-        isImplementationOf : function(interface) {
+        implementationOf : function(interface) {
+            if (interface && interface.__type == "jInterface" && interface.__hash !== '') {
+                if (cache.hashes.classes[this.__hash].inheritance.implements.indexOf(interface.__hash) != -1) {
+                     return true;
+                }
+            }
             return false;
         },
 
@@ -370,104 +400,6 @@
          */
         clone : function() {
             return {}
-        },
-
-        /**
-         * Generates a md5 hash tag for the given string
-         * @param obj String
-         */
-        classHash : function(obj) {
-            function hexmd(s) { return strToHex(rstrmd(strToUtf(s))); }
-            function rstrmd(s) { return binToStr(binMd(strToBin(s), s.length * 8)); }
-            function bitRol(num, cnt) { return (num << cnt) | (num >>> (32 - cnt)); }
-            function cmnMd(q, a, b, x, s, t) {  return safeAdd(bitRol(safeAdd(safeAdd(a, q), safeAdd(x, t)), s),b);}
-            function ffMd(a, b, c, d, x, s, t) { return cmnMd((b & c) | ((~b) & d), a, b, x, s, t); }
-            function ggMd(a, b, c, d, x, s, t) { return cmnMd((b & d) | (c & (~d)), a, b, x, s, t); }
-            function hhMd(a, b, c, d, x, s, t) { return cmnMd(b ^ c ^ d, a, b, x, s, t); }
-            function iiMd(a, b, c, d, x, s, t) { return cmnMd(c ^ (b | (~d)), a, b, x, s, t); }
-
-            function strToHex(input) {
-                var hex = "0123456789ABCDEF", output = "", x;
-                for(var i = 0; i < input.length; i++) { x = input.charCodeAt(i); output += hex.charAt((x >>> 4) & 0x0F) + hex.charAt(x & 0x0F);}
-                return output;
-            }
-
-            function strToUtf(input) {
-                var output = "", i = -1, x, y;
-                while(++i < input.length) {
-                    x = input.charCodeAt(i);
-                    y = i + 1 < input.length ? input.charCodeAt(i + 1) : 0;
-                    if(0xD800 <= x && x <= 0xDBFF && 0xDC00 <= y && y <= 0xDFFF) {
-                        x = 0x10000 + ((x & 0x03FF) << 10) + (y & 0x03FF);
-                        i++;
-                    }
-                    if(x <= 0x7F) output += String.fromCharCode(x);
-                    else if(x <= 0x7FF) output += String.fromCharCode(0xC0 | ((x >>> 6 ) & 0x1F), 0x80 | ( x         & 0x3F));
-                    else if(x <= 0xFFFF) output += String.fromCharCode(0xE0 | ((x >>> 12) & 0x0F), 0x80 | ((x >>> 6 ) & 0x3F), 0x80 | ( x         & 0x3F));
-                    else if(x <= 0x1FFFFF) output += String.fromCharCode(0xF0 | ((x >>> 18) & 0x07), 0x80 | ((x >>> 12) & 0x3F), 0x80 | ((x >>> 6 ) & 0x3F), 0x80 | ( x         & 0x3F));
-                }
-                return output;
-            }
-
-            function strToBin(input) {
-                var output = Array(input.length >> 2);
-                for(var i = 0; i < output.length; i++) output[i] = 0;
-                for(var j = 0; j < input.length * 8; j += 8) output[j>>5] |= (input.charCodeAt(j / 8) & 0xFF) << (j%32);
-                return output;
-            }
-
-            function binToStr(input) {
-                var output = "";
-                for(var i = 0; i < input.length * 32; i += 8) output += String.fromCharCode((input[i>>5] >>> (i % 32)) & 0xFF);
-                return output;
-            }
-
-            function binMd(x, len) {
-                x[len >> 5] |= 0x80 << ((len) % 32);
-                x[(((len + 64) >>> 9) << 4) + 14] = len;
-                var a =  1732584193, b = -271733879, c = -1732584194, d =  271733878;
-
-                for(var i = 0; i < x.length; i += 16) {
-                    var a1 = a, b1 = b, c1 = c, d1 = d;
-                    a = ffMd(a, b, c, d, x[i+ 0], 7 , -680876936);  d = ffMd(d, a, b, c, x[i+ 1], 12, -389564586);
-                    c = ffMd(c, d, a, b, x[i+ 2], 17,  606105819);  b = ffMd(b, c, d, a, x[i+ 3], 22, -1044525330);
-                    a = ffMd(a, b, c, d, x[i+ 4], 7 , -176418897);  d = ffMd(d, a, b, c, x[i+ 5], 12,  1200080426);
-                    c = ffMd(c, d, a, b, x[i+ 6], 17, -1473231341); b = ffMd(b, c, d, a, x[i+ 7], 22, -45705983);
-                    a = ffMd(a, b, c, d, x[i+ 8], 7 ,  1770035416); d = ffMd(d, a, b, c, x[i+ 9], 12, -1958414417);
-                    c = ffMd(c, d, a, b, x[i+10], 17, -42063);      b = ffMd(b, c, d, a, x[i+11], 22, -1990404162);
-                    a = ffMd(a, b, c, d, x[i+12], 7 ,  1804603682); d = ffMd(d, a, b, c, x[i+13], 12, -40341101);
-                    c = ffMd(c, d, a, b, x[i+14], 17, -1502002290); b = ffMd(b, c, d, a, x[i+15], 22,  1236535329);
-                    a = ggMd(a, b, c, d, x[i+ 1], 5 , -165796510);  d = ggMd(d, a, b, c, x[i+ 6], 9 , -1069501632);
-                    c = ggMd(c, d, a, b, x[i+11], 14,  643717713);  b = ggMd(b, c, d, a, x[i+ 0], 20, -373897302);
-                    a = ggMd(a, b, c, d, x[i+ 5], 5 , -701558691);  d = ggMd(d, a, b, c, x[i+10], 9 ,  38016083);
-                    c = ggMd(c, d, a, b, x[i+15], 14, -660478335);  b = ggMd(b, c, d, a, x[i+ 4], 20, -405537848);
-                    a = ggMd(a, b, c, d, x[i+ 9], 5 ,  568446438);  d = ggMd(d, a, b, c, x[i+14], 9 , -1019803690);
-                    c = ggMd(c, d, a, b, x[i+ 3], 14, -187363961);  b = ggMd(b, c, d, a, x[i+ 8], 20,  1163531501);
-                    a = ggMd(a, b, c, d, x[i+13], 5 , -1444681467); d = ggMd(d, a, b, c, x[i+ 2], 9 , -51403784);
-                    c = ggMd(c, d, a, b, x[i+ 7], 14,  1735328473); b = ggMd(b, c, d, a, x[i+12], 20, -1926607734);
-                    a = hhMd(a, b, c, d, x[i+ 5], 4 , -378558);     d = hhMd(d, a, b, c, x[i+ 8], 11, -2022574463);
-                    c = hhMd(c, d, a, b, x[i+11], 16,  1839030562); b = hhMd(b, c, d, a, x[i+14], 23, -35309556);
-                    a = hhMd(a, b, c, d, x[i+ 1], 4 , -1530992060); d = hhMd(d, a, b, c, x[i+ 4], 11,  1272893353);
-                    c = hhMd(c, d, a, b, x[i+ 7], 16, -155497632);  b = hhMd(b, c, d, a, x[i+10], 23, -1094730640);
-                    a = hhMd(a, b, c, d, x[i+13], 4 ,  681279174);  d = hhMd(d, a, b, c, x[i+ 0], 11, -358537222);
-                    c = hhMd(c, d, a, b, x[i+ 3], 16, -722521979);  b = hhMd(b, c, d, a, x[i+ 6], 23,  76029189);
-                    a = hhMd(a, b, c, d, x[i+ 9], 4 , -640364487);  d = hhMd(d, a, b, c, x[i+12], 11, -421815835);
-                    c = hhMd(c, d, a, b, x[i+15], 16,  530742520);  b = hhMd(b, c, d, a, x[i+ 2], 23, -995338651);
-                    a = iiMd(a, b, c, d, x[i+ 0], 6 , -198630844);  d = iiMd(d, a, b, c, x[i+ 7], 10,  1126891415);
-                    c = iiMd(c, d, a, b, x[i+14], 15, -1416354905); b = iiMd(b, c, d, a, x[i+ 5], 21, -57434055);
-                    a = iiMd(a, b, c, d, x[i+12], 6 ,  1700485571); d = iiMd(d, a, b, c, x[i+ 3], 10, -1894986606);
-                    c = iiMd(c, d, a, b, x[i+10], 15, -1051523);    b = iiMd(b, c, d, a, x[i+ 1], 21, -2054922799);
-                    a = iiMd(a, b, c, d, x[i+ 8], 6 ,  1873313359); d = iiMd(d, a, b, c, x[i+15], 10, -30611744);
-                    c = iiMd(c, d, a, b, x[i+ 6], 15, -1560198380); b = iiMd(b, c, d, a, x[i+13], 21,  1309151649);
-                    a = iiMd(a, b, c, d, x[i+ 4], 6 , -145523070);  d = iiMd(d, a, b, c, x[i+11], 10, -1120210379);
-                    c = iiMd(c, d, a, b, x[i+ 2], 15,  718787259);  b = iiMd(b, c, d, a, x[i+ 9], 21, -343485551);
-                    a = safeAdd(a, a1); b = safeAdd(b, b1); c = safeAdd(c, c1); d = safeAdd(d, d1);
-                }
-                return Array(a, b, c, d);
-            }
-            function safeAdd(x, y) { var lsw = (x & 0xFFFF) + (y & 0xFFFF); return (((x >> 16) + (y >> 16) + (lsw >> 16)) << 16) | (lsw & 0xFFFF); }
-
-            return hexmd(obj);
         },
 
         /**
@@ -571,7 +503,7 @@
     };
 
 
-    //window['jUtils'] = jUtils;
+    window['jUtils'] = jUtils;
     window['jClass'] = jClass;
 
 })();

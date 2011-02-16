@@ -6,11 +6,12 @@
 
 $(document).ready(function(){
 
+
     module("Core");
 
     test("Runtime libraries loading", function() {
         expect(4);
-
+        
         jClass.config.librariesPath = "libtest";
 
         raises(function() {

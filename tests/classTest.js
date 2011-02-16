@@ -36,9 +36,11 @@ $(document).ready(function(){
             }
         });
 
-        raises(function() { mainClass(); }, "Class instantiation");
+        try { mainClass(); }
+        catch(ex) { ok(ex.message == "Cannot instantiate the object these way. Use `new Class()` to instantiate or `Class(object)` to cast object to Class","Class instantiation"); }
 
-        raises(function() { mainClass({asd:1}) }, "Casting wrong type of objects");
+        try { mainClass({asd:1}) }
+        catch(ex) { ok(ex.message == "Cast error! Object cannot be cast to this type of class", "Casting wrong type of objects"); }
 
         var tmp = mainClass({parentPublicVar:1, parentFromConstructor:2});
         deepEqual(tmp.getPrivateVars(), [0, "parent private var", "parentPrivate 0 1"], "Object casting");
@@ -67,10 +69,8 @@ $(document).ready(function(){
             }
         });
 
-        raises(function() {
-            var tmp = function() {};
-            jClass.extend(tmp)({})
-        }, "Cannot extend anything else beside jClass types");
+        try { jClass.extend(function() {})({}) }
+        catch(ex) { ok(ex.message == "Cannot extend other types beside jClass classes", "Cannot extend anything else beside jClass types"); }
 
         var mainClass = jClass({
             constructor : function(arg) {
